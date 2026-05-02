@@ -44,7 +44,6 @@ func main() {
 	observability.StartMetricsServer(queue, cfg.MetricsPort, logger)
 	observability.RegisterAdminHandlers(queue, logger)
 
-	// pprof — sadece local profiling için, production'da kaldır
 	go func() {
 		logger.Info("pprof_started", slog.String("port", ":6060"))
 		if err := http.ListenAndServe(":6060", nil); err != nil {
