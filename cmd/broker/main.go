@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	_ "net/http/pprof" // pprof handler'larını http.DefaultServeMux'a register eder
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
