@@ -21,10 +21,12 @@ type Server struct {
 func (s *Server) Publish(ctx context.Context, req *brokerv1.PublishRequest) (*brokerv1.PublishResponse, error) {
 	id := uuid.NewString()
 
-	s.Queue.Enqueue(inmem.Message{
+	if err := s.Queue.Enqueue(inmem.Message{
 		ID:      id,
 		Payload: req.Payload,
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	s.Logger.Info("message_published",
 		slog.String("messageID", id),

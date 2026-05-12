@@ -16,6 +16,7 @@ type Queue struct {
 	inflightCount map[string]int
 	dlq           []Message
 	shuttingDown  bool
+	wal           *WAL
 
 	totalPublished       uint64
 	totalAcked           uint64
@@ -32,7 +33,7 @@ type Queue struct {
 	logger *slog.Logger
 }
 
-func NewQueue(logger *slog.Logger, cfg config.Config) *Queue {
+func NewQueue(logger *slog.Logger, cfg config.Config, wal *WAL) *Queue {
 	q := &Queue{
 		ready:         make([]DelayedMessage, 0),
 		inflight:      make(map[string]Lease),
@@ -42,6 +43,7 @@ func NewQueue(logger *slog.Logger, cfg config.Config) *Queue {
 		maxDLQSize:    cfg.MaxDLQSize,
 		timeout:       cfg.VisibilityTimeout,
 		logger:        logger,
+		wal:           wal,
 	}
 	q.cond = sync.NewCond(&q.mu)
 	go q.reaper()

@@ -14,6 +14,7 @@ type Config struct {
 	VisibilityTimeout time.Duration
 	DrainTimeout      time.Duration
 	DefaultPrefetch   int
+	WALPath           string
 }
 
 func Load() Config {
@@ -25,6 +26,7 @@ func Load() Config {
 		VisibilityTimeout: getEnvDuration("VISIBILITY_TIMEOUT_SEC", 5),
 		DrainTimeout:      getEnvDuration("DRAIN_TIMEOUT_SEC", 10),
 		DefaultPrefetch:   getEnvInt("DEFAULT_PREFETCH", 1),
+		WALPath:           getEnv("WAL_PATH", ""),
 	}
 }
 

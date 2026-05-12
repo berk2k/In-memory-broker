@@ -28,7 +28,18 @@ func main() {
 	cfg := config.Load()
 	logger := observability.NewLogger()
 
-	queue := inmem.NewQueue(logger, cfg)
+	var wal *inmem.WAL
+	if cfg.WALPath != "" {
+		var err error
+		wal, err = inmem.OpenWAL(cfg.WALPath)
+		if err != nil {
+			logger.Error("wal_open_failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		defer wal.Close()
+	}
+
+	queue := inmem.NewQueue(logger, cfg, wal)
 
 	lis, err := net.Listen("tcp", cfg.GRPCPort)
 	if err != nil {

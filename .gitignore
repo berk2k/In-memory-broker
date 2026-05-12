@@ -39,3 +39,13 @@ coverage.out
 coverage.html
 
 mini-go-broker-docs/
+
+# Local agent files
+CLAUDE.md
+.claudeignore
+.claude/
+
+# Broker persistence files
+*.wal
+wal.log
+data/

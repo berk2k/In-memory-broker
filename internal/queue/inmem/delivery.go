@@ -9,9 +9,15 @@ import (
 	"github.com/google/uuid"
 )
 
-func (q *Queue) Enqueue(msg Message) {
+func (q *Queue) Enqueue(msg Message) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	if q.wal != nil {
+		if err := q.wal.appendPublish(msg.ID, msg.Payload); err != nil {
+			return err
+		}
+	}
 
 	q.ready = append(q.ready, DelayedMessage{
 		Message: msg,
@@ -20,6 +26,7 @@ func (q *Queue) Enqueue(msg Message) {
 
 	q.totalPublished++
 	q.cond.Signal()
+	return nil
 }
 
 func (q *Queue) DequeueLeaseBlocking(consumerID string, prefetch int) (string, Message) {
@@ -90,6 +97,12 @@ func (q *Queue) Ack(deliveryID string, consumerID string) error {
 	}
 
 	latency := time.Since(lease.StartedAt)
+
+	if q.wal != nil {
+		if err := q.wal.appendAck(lease.Message.ID); err != nil {
+			return err
+		}
+	}
 
 	q.totalProcessed++
 	q.totalProcessingNanos += uint64(latency.Nanoseconds())
