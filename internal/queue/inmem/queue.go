@@ -1,6 +1,7 @@
 package inmem
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -109,6 +110,48 @@ func (q *Queue) PeekDLQ() []Message {
 	result := make([]Message, len(q.dlq))
 	copy(result, q.dlq)
 	return result
+}
+
+func (q *Queue) Recover(records []WALRecord) (int, error) {
+	published := make(map[string]Message)
+	publishedOrder := make([]string, 0)
+	acked := make(map[string]struct{})
+
+	for _, r := range records {
+		switch r.Type {
+		case "publish":
+			if _, exists := published[r.MessageID]; !exists {
+				publishedOrder = append(publishedOrder, r.MessageID)
+			}
+			published[r.MessageID] = Message{ID: r.MessageID, Payload: r.Payload}
+		case "ack":
+			acked[r.MessageID] = struct{}{}
+		default:
+			return 0, fmt.Errorf("unknown WAL record type %q for messageID %s", r.Type, r.MessageID)
+		}
+	}
+
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	count := 0
+	for _, id := range publishedOrder {
+		if _, done := acked[id]; done {
+			continue
+		}
+
+		msg := published[id]
+		q.ready = append(q.ready, DelayedMessage{
+			Message: msg,
+			ReadyAt: time.Now(),
+		})
+		count++
+	}
+
+	if count > 0 {
+		q.cond.Broadcast()
+	}
+	return count, nil
 }
 
 func (q *Queue) ReplayDLQ() int {

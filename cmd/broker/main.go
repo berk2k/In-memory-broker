@@ -29,8 +29,17 @@ func main() {
 	logger := observability.NewLogger()
 
 	var wal *inmem.WAL
+	var records []inmem.WALRecord
+
 	if cfg.WALPath != "" {
 		var err error
+
+		records, err = inmem.ReplayWAL(cfg.WALPath)
+		if err != nil {
+			logger.Error("wal_replay_failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+
 		wal, err = inmem.OpenWAL(cfg.WALPath)
 		if err != nil {
 			logger.Error("wal_open_failed", slog.String("error", err.Error()))
@@ -40,6 +49,16 @@ func main() {
 	}
 
 	queue := inmem.NewQueue(logger, cfg, wal)
+
+	if len(records) > 0 {
+		count, err := queue.Recover(records)
+		if err != nil {
+			logger.Error("wal_recovery_failed", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+
+		logger.Info("wal_recovery_completed", slog.Int("recoveredMessages", count))
+	}
 
 	lis, err := net.Listen("tcp", cfg.GRPCPort)
 	if err != nil {

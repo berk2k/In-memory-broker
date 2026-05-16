@@ -1,6 +1,7 @@
 package inmem
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,7 +18,9 @@ type WAL struct {
 	file *os.File
 }
 
-type walRecord struct {
+// WALRecord is one line in the WAL file. Exported so queue.go can apply
+// broker semantics without importing a separate type.
+type WALRecord struct {
 	Type      string    `json:"type"`
 	MessageID string    `json:"messageID"`
 	Payload   []byte    `json:"payload,omitempty"` // base64-encoded by encoding/json; present only in publish records
@@ -34,7 +37,7 @@ func OpenWAL(path string) (*WAL, error) {
 }
 
 func (w *WAL) appendPublish(messageID string, payload []byte) error {
-	return w.write(walRecord{
+	return w.write(WALRecord{
 		Type:      "publish",
 		MessageID: messageID,
 		Payload:   payload,
@@ -43,7 +46,7 @@ func (w *WAL) appendPublish(messageID string, payload []byte) error {
 }
 
 func (w *WAL) appendAck(messageID string) error {
-	return w.write(walRecord{
+	return w.write(WALRecord{
 		Type:      "ack",
 		MessageID: messageID,
 		Timestamp: time.Now().UTC(),
@@ -51,7 +54,7 @@ func (w *WAL) appendAck(messageID string) error {
 }
 
 // write marshals r as a single JSON line and fsyncs before returning.
-func (w *WAL) write(r walRecord) error {
+func (w *WAL) write(r WALRecord) error {
 	data, err := json.Marshal(r)
 	if err != nil {
 		return fmt.Errorf("wal marshal: %w", err)
@@ -69,4 +72,34 @@ func (w *WAL) write(r walRecord) error {
 // Close flushes and closes the underlying file.
 func (w *WAL) Close() error {
 	return w.file.Close()
+}
+
+// ReplayWAL opens the WAL at path read-only and returns all records in order.
+// Returns nil, nil if the file does not exist (clean first run).
+// Returns an error on any JSON parse failure — corrupt tails are a later concern.
+func ReplayWAL(path string) ([]WALRecord, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("replay wal open: %w", err)
+	}
+	defer f.Close()
+
+	var records []WALRecord
+	scanner := bufio.NewScanner(f)
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		var r WALRecord
+		if err := json.Unmarshal(scanner.Bytes(), &r); err != nil {
+			return nil, fmt.Errorf("wal corrupt at line %d: %w", lineNum, err)
+		}
+		records = append(records, r)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("wal scan: %w", err)
+	}
+	return records, nil
 }
