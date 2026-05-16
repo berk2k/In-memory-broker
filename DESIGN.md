@@ -418,9 +418,126 @@ This approach avoids flag parsing complexity and config file formats. The broker
 
 ---
 
-# 12: Known Limitations
+# 12: Optional WAL Persistence
 
-- In-memory only (no persistence)
+The broker supports an optional write-ahead log (WAL), enabled by setting `WAL_PATH`.
+
+By default, if `WAL_PATH` is unset, the broker remains fully in-memory and behaves as before.
+
+When WAL is enabled, the broker persists state-changing events as newline-delimited JSON records:
+
+- `publish` records contain `messageID` and payload
+- `ack` records contain `messageID`
+- `deliveryID` is not persisted because it is ephemeral
+
+Payloads are stored in the WAL because recovery requires reconstructing the original message. Payloads are still never written to structured application logs.
+
+---
+
+## Durability Contract
+
+The WAL uses a conservative write path:
+```text
+write WAL record
+→ fsync
+→ mutate in-memory state
+→ return OK to client
+```
+
+
+This means that once the broker acknowledges a publish or ack operation, the corresponding WAL record has been flushed to disk.
+
+### Why fsync on every write?
+
+This is intentionally simple and safe.
+
+Trade-off:
+
+- Stronger durability guarantee
+- Easier crash-recovery reasoning
+- Lower throughput due to one fsync per publish/ack
+
+Future versions may batch fsyncs or use group commit, but the current implementation prioritizes clarity over throughput.
+
+---
+
+## Startup Recovery
+
+On startup, if `WAL_PATH` is set, the broker replays WAL records before accepting traffic.
+
+Recovery logic:
+
+```text
+publish without matching ack → recover into ready queue
+publish with matching ack    → do not recover
+```
+
+
+Inflight leases are not restored. If a message was inflight during a crash but not acked, it is recovered as ready and may be delivered again.
+
+This preserves at-least-once delivery.
+
+---
+
+## Stable vs Ephemeral Identity
+
+The WAL stores `messageID`, not `deliveryID`.
+
+- `messageID` is stable across retries and recovery
+- `deliveryID` represents one delivery lease
+- `deliveryID` becomes meaningless after restart
+
+After recovery, a redelivered message receives a new `deliveryID`.
+
+---
+
+## WAL Format
+
+The WAL uses newline-delimited JSON.
+
+Example:
+
+```json
+{"type":"publish","messageID":"m1","payload":"aGVsbG8=","ts":"2026-05-16T18:31:37Z"}
+{"type":"ack","messageID":"m1","ts":"2026-05-16T19:09:44Z"}
+```
+
+### Why JSON?
+
+- Human-readable
+- Easy to inspect during learning
+- Simple to implement and debug
+
+### Trade-off
+
+- Larger than binary formats
+- Slower to parse
+- Not ideal for production-scale throughput
+
+---
+
+## Current WAL Limitations
+
+The current WAL is intentionally small.
+
+Not yet implemented:
+
+- Nack/requeue persistence
+- Retry attempt persistence
+- DLQ persistence
+- Corrupt tail truncation
+- Checkpointing / compaction
+- WAL segment rotation
+- Encryption
+
+Because retry attempts and DLQ state are not durable yet, a crash can still lose retry/DLQ history. The current WAL only recovers published messages that were not acked.
+
+# 13: Known Limitations
+
+- Persistence is optional and currently limited to publish/ack WAL recovery
+- Retry attempts and DLQ contents are not durable yet
+- WAL has no checkpointing or compaction yet
+- Corrupt WAL tail truncation is not implemented yet
 - O(n) inflight scan on consumer disconnect
 - No partitioning or sharding
 - No exchange or routing model
@@ -430,11 +547,14 @@ These are intentional omissions to keep the focus on delivery semantics.
 
 ---
 
-# 13: Future Improvements
+# 14: Future Improvements
 
 Potential extensions:
 
-- Persistent storage layer
+- Retry/Nack/DLQ persistence
+- WAL corrupt tail truncation
+- WAL checkpointing / compaction
+- Persistent storage beyond append-only WAL
 - Partitioned queues
 - Exchange & routing model
 - Prometheus client library (histogram buckets)
@@ -444,7 +564,7 @@ Potential extensions:
 
 ---
 
-# 14: Benchmark Results
+# 15: Benchmark Results
 
 Load tests were run on a local machine using `go run ./cmd/loadtest`.
 

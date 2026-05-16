@@ -40,6 +40,13 @@ The goal is to make distributed messaging mechanics explicit instead of hidden b
 - Graceful shutdown with draining
 - Timeout-based forced requeue on shutdown
 
+## Optional Persistence
+
+- Opt-in write-ahead log (WAL) via `WAL_PATH`
+- Crash recovery for published but unacked messages
+- Startup replay from newline-delimited JSON WAL records
+- Fsync-before-mutate durability model
+
 ## Observability
 
 - Structured JSON logging (slog)
@@ -88,7 +95,27 @@ Expected output:
 {"time":"...","level":"INFO","msg":"broker_started","port":":50051"}
 ```
 
+### Run with WAL enabled
+
+By default, the broker runs fully in memory. To enable the optional write-ahead log:
+
+**Windows CMD**
+
+```cmd
+set WAL_PATH=.\wal.log
+go run .\cmd\broker
+```
+**Unix/macOS/Git Bash**
+
+```bash
+WAL_PATH=./wal.log go run ./cmd/broker
+```
+
+When WAL is enabled, the broker writes `publish` and `ack` records before mutating in-memory state. On startup, it replays the WAL and restores published messages that do not have a matching ack.
+
+WAL files may contain message payloads. Do not commit `wal.log`, `*.wal`, or local data directories to Git.
 ---
+
 
 # Configuration
 
@@ -103,6 +130,7 @@ All parameters are configurable via environment variables. Defaults are applied 
 | VISIBILITY_TIMEOUT_SEC | 5 | Lease deadline in seconds |
 | DRAIN_TIMEOUT_SEC | 10 | Graceful shutdown drain window |
 | DEFAULT_PREFETCH | 1 | Default per-consumer prefetch limit |
+| WAL_PATH | unset | Optional WAL file path. When set, publish/ack records are persisted and replayed on startup. |
 
 ---
 
@@ -183,6 +211,24 @@ Consumer (gRPC streaming)
 Timeout / Nack → Ready or DLQ
 ```
 
+With WAL enabled:
+```
+Producer
+↓
+gRPC Publish
+↓
+WAL append + fsync
+↓
+Ready Queue
+
+on restart:
+WAL replay
+↓
+publish without ack → Ready Queue
+
+publish with ack → Done
+```
+
 ---
 
 # Delivery Model
@@ -258,7 +304,10 @@ _Tested with `go run ./cmd/loadtest --messages 500 --prefetch 50`_
 
 # Current Limitations
 
-- In-memory only (no persistence)
+- Persistence is optional and currently limited to publish/ack WAL recovery
+- Retry attempts, Nack/requeue state, and DLQ contents are not durable yet
+- WAL compaction/checkpointing is not implemented yet
+- Corrupt tail truncation is not implemented yet
 - No partitioning
 - No exchange/routing model
 - No histogram-based latency buckets (average only)
@@ -279,7 +328,10 @@ See [DESIGN.md](DESIGN.md) for detailed trade-offs and architectural reasoning.
 - [x] Environment-based configuration
 - [x] Python admin CLI (metrics, health, DLQ inspect, config validate)
 - [x] Load test with scaling analysis and pprof profiling
-- [ ] Optional persistence layer
+- [x] Optional WAL persistence for publish/ack recovery
+- [ ] Corrupt WAL tail truncation
+- [ ] Retry/Nack/DLQ persistence
+- [ ] WAL checkpointing / compaction
 - [ ] Per-consumer inflight index (O(k) disconnect)
 
 ---
