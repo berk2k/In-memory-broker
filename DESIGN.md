@@ -516,6 +516,31 @@ Example:
 
 ---
 
+---
+
+## Corrupt Tail Handling
+
+A crash can happen while the broker is appending a WAL record. In that case, the WAL may end with a partial JSON line:
+
+```json
+{"type":"publish","messageID":"m1","payload":"aGVsbG8=","ts":"2026-05-16T18:31:37Z"}
+{"type":"publish","messageID":"m2"
+```
+During startup replay, the broker tracks the byte offset after the last valid WAL record.
+
+If the final line is corrupt or incomplete, the broker truncates the WAL back to the last valid offset and continues replaying the valid records.
+
+This is safe because WAL writes are append-only. A crash during append can leave an incomplete record at the end of the file, while earlier fsynced records remain valid.
+
+Corruption before the final line is still treated as fatal. The broker refuses to start because skipping a middle record could reconstruct an incorrect queue state.
+
+Recovery behavior:
+```text
+valid records before corrupt tail → replayed
+corrupt final record              → truncated
+corrupt middle record             → startup error
+```
+
 ## Current WAL Limitations
 
 The current WAL is intentionally small.
@@ -525,7 +550,6 @@ Not yet implemented:
 - Nack/requeue persistence
 - Retry attempt persistence
 - DLQ persistence
-- Corrupt tail truncation
 - Checkpointing / compaction
 - WAL segment rotation
 - Encryption
@@ -537,7 +561,6 @@ Because retry attempts and DLQ state are not durable yet, a crash can still lose
 - Persistence is optional and currently limited to publish/ack WAL recovery
 - Retry attempts and DLQ contents are not durable yet
 - WAL has no checkpointing or compaction yet
-- Corrupt WAL tail truncation is not implemented yet
 - O(n) inflight scan on consumer disconnect
 - No partitioning or sharding
 - No exchange or routing model
@@ -552,7 +575,6 @@ These are intentional omissions to keep the focus on delivery semantics.
 Potential extensions:
 
 - Retry/Nack/DLQ persistence
-- WAL corrupt tail truncation
 - WAL checkpointing / compaction
 - Persistent storage beyond append-only WAL
 - Partitioned queues

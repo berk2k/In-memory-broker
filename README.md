@@ -46,6 +46,7 @@ The goal is to make distributed messaging mechanics explicit instead of hidden b
 - Crash recovery for published but unacked messages
 - Startup replay from newline-delimited JSON WAL records
 - Fsync-before-mutate durability model
+- Corrupt WAL tail truncation during startup replay
 
 ## Observability
 
@@ -307,7 +308,6 @@ _Tested with `go run ./cmd/loadtest --messages 500 --prefetch 50`_
 - Persistence is optional and currently limited to publish/ack WAL recovery
 - Retry attempts, Nack/requeue state, and DLQ contents are not durable yet
 - WAL compaction/checkpointing is not implemented yet
-- Corrupt tail truncation is not implemented yet
 - No partitioning
 - No exchange/routing model
 - No histogram-based latency buckets (average only)
@@ -329,7 +329,7 @@ See [DESIGN.md](DESIGN.md) for detailed trade-offs and architectural reasoning.
 - [x] Python admin CLI (metrics, health, DLQ inspect, config validate)
 - [x] Load test with scaling analysis and pprof profiling
 - [x] Optional WAL persistence for publish/ack recovery
-- [ ] Corrupt WAL tail truncation
+- [x] Corrupt WAL tail truncation
 - [ ] Retry/Nack/DLQ persistence
 - [ ] WAL checkpointing / compaction
 - [ ] Per-consumer inflight index (O(k) disconnect)
