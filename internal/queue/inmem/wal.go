@@ -3,7 +3,9 @@ package inmem
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 )
@@ -74,6 +76,7 @@ func (w *WAL) Close() error {
 	return w.file.Close()
 }
 
+/*
 // ReplayWAL opens the WAL at path read-only and returns all records in order.
 // Returns nil, nil if the file does not exist (clean first run).
 // Returns an error on any JSON parse failure — corrupt tails are a later concern.
@@ -102,4 +105,75 @@ func ReplayWAL(path string) ([]WALRecord, error) {
 		return nil, fmt.Errorf("wal scan: %w", err)
 	}
 	return records, nil
+*/
+
+// ReplayWAL opens the WAL at path read-only and returns all valid records in order.
+// Returns nil, nil if the file does not exist.
+//
+// If the WAL ends with a partial/corrupt final record, ReplayWAL truncates the
+// file back to the last valid record and returns the valid records. Corruption
+// before the final line remains fatal.
+func ReplayWAL(path string) ([]WALRecord, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("replay wal open: %w", err)
+	}
+	defer f.Close()
+
+	var records []WALRecord
+	reader := bufio.NewReader(f)
+
+	var currentOffset int64
+	var lastValidOffset int64
+	lineNum := 0
+
+	for {
+		line, err := reader.ReadBytes('\n')
+
+		if len(line) > 0 {
+			lineNum++
+			nextOffset := currentOffset + int64(len(line))
+
+			var r WALRecord
+			if parseErr := json.Unmarshal(line, &r); parseErr != nil {
+				if errors.Is(err, io.EOF) {
+					if truncateErr := truncateWAL(path, lastValidOffset); truncateErr != nil {
+						return nil, truncateErr
+					}
+					return records, nil
+				}
+
+				return nil, fmt.Errorf("wal corrupt at line %d: %w", lineNum, parseErr)
+			}
+
+			records = append(records, r)
+			currentOffset = nextOffset
+			lastValidOffset = currentOffset
+		}
+
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("wal read: %w", err)
+		}
+	}
+
+	return records, nil
+}
+
+func truncateWAL(path string, offset int64) error {
+	if offset < 0 {
+		return fmt.Errorf("truncate wal: negative offset %d", offset)
+	}
+
+	if err := os.Truncate(path, offset); err != nil {
+		return fmt.Errorf("truncate wal: %w", err)
+	}
+
+	return nil
 }
