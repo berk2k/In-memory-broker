@@ -333,6 +333,7 @@ See [DESIGN.md](DESIGN.md) for detailed trade-offs and architectural reasoning.
 - [ ] Retry/Nack/DLQ persistence
 - [ ] WAL checkpointing / compaction
 - [ ] Per-consumer inflight index (O(k) disconnect)
+- [ ] Deterministic Simulation Testing
 
 ---
 
